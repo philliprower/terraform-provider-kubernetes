@@ -1,6 +1,7 @@
 package kubernetes
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 
@@ -30,6 +31,12 @@ func resourceKubernetesSecret() *schema.Resource {
 				Optional:    true,
 				Sensitive:   true,
 			},
+			"base64data": {
+				Type:        schema.TypeMap,
+				Description: "A map of the base64-encoded secret data.",
+				Optional:    true,
+				Sensitive:   true,
+			},
 			"type": {
 				Type:        schema.TypeString,
 				Description: "Type of secret",
@@ -44,10 +51,30 @@ func resourceKubernetesSecret() *schema.Resource {
 func resourceKubernetesSecretCreate(d *schema.ResourceData, meta interface{}) error {
 	conn := meta.(*KubeClientsets).MainClientset
 
+	// Merge data and base64-encoded data into a single data map
+	dataMap := d.Get("data").(map[string]interface{})
+	for key, value := range d.Get("base64data").(map[string]interface{}) {
+		// Decode Terraform's base64 representation to avoid double-encoding in Kubernetes.
+		var decodedValue []byte
+		var err error
+		switch value.(type) {
+		case string:
+			decodedValue, err = base64.StdEncoding.DecodeString(value.(string))
+		case []uint8:
+			decodedValue, err = base64.StdEncoding.DecodeString(string(value.([]uint8)))
+		default:
+			err = fmt.Errorf("base64data cannot decode type %T", value)
+		}
+		if err != nil {
+			return err
+		}
+		dataMap[key] = string(decodedValue)
+	}
+
 	metadata := expandMetadata(d.Get("metadata").([]interface{}))
 	secret := api.Secret{
 		ObjectMeta: metadata,
-		Data:       expandStringMapToByteMap(d.Get("data").(map[string]interface{})),
+		Data:       expandStringMapToByteMap(dataMap),
 	}
 
 	if v, ok := d.GetOk("type"); ok {
@@ -86,8 +113,15 @@ func resourceKubernetesSecretRead(d *schema.ResourceData, meta interface{}) erro
 		return err
 	}
 
-	d.Set("data", flattenByteMapToStringMap(secret.Data))
 	d.Set("type", secret.Type)
+
+	secretData := flattenByteMapToStringMap(secret.Data)
+	// Remove base64data keys from the payload before setting the data key on the resource. If
+	// these keys are not removed, they will always show in the diff at update.
+	for key, _ := range d.Get("base64data").(map[string]interface{}) {
+		delete(secretData, key)
+	}
+	d.Set("data", secretData)
 
 	return nil
 }
@@ -101,11 +135,18 @@ func resourceKubernetesSecretUpdate(d *schema.ResourceData, meta interface{}) er
 	}
 
 	ops := patchMetadata("metadata.0.", "/metadata/", d)
-	if d.HasChange("data") {
+	if d.HasChange("data") || d.HasChange("base64data") {
 		oldV, newV := d.GetChange("data")
-
 		oldV = base64EncodeStringMap(oldV.(map[string]interface{}))
 		newV = base64EncodeStringMap(newV.(map[string]interface{}))
+
+		oldVB64, newVB64 := d.GetChange("base64data")
+		for key, value := range oldVB64.(map[string]interface{}) {
+			oldV.(map[string]interface{})[key] = value
+		}
+		for key, value := range newVB64.(map[string]interface{}) {
+			newV.(map[string]interface{})[key] = value
+		}
 
 		diffOps := diffStringMap("/data/", oldV.(map[string]interface{}), newV.(map[string]interface{}))
 
