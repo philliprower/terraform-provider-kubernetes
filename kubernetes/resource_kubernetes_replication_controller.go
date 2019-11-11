@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,7 +74,7 @@ func resourceKubernetesReplicationController() *schema.Resource {
 }
 
 func replicationControllerTemplateFieldSpec() map[string]*schema.Schema {
-	metadata := namespacedMetadataSchema("replication controller's template", true)
+	metadata := namespacedMetadataSchemaIsTemplate("replication controller's template", true, true)
 	// TODO: make this required once the legacy fields are removed
 	metadata.Computed = true
 	metadata.Required = false
@@ -256,7 +256,7 @@ func resourceKubernetesReplicationControllerDelete(d *schema.ResourceData, meta 
 		return err
 	}
 
-	err = conn.CoreV1().ReplicationControllers(namespace).Delete(name, &metav1.DeleteOptions{})
+	err = conn.CoreV1().ReplicationControllers(namespace).Delete(name, &deleteOptions)
 	if err != nil {
 		return err
 	}

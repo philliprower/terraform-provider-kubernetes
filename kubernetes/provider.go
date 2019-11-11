@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/logging"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"github.com/mitchellh/go-homedir"
 	kubernetes "k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -156,6 +158,7 @@ func Provider() terraform.ResourceProvider {
 			"kubernetes_persistent_volume":         resourceKubernetesPersistentVolume(),
 			"kubernetes_persistent_volume_claim":   resourceKubernetesPersistentVolumeClaim(),
 			"kubernetes_pod":                       resourceKubernetesPod(),
+			"kubernetes_pod_disruption_budget":     resourceKubernetesPodDisruptionBudget(),
 			"kubernetes_priority_class":            resourceKubernetesPriorityClass(),
 			"kubernetes_replication_controller":    resourceKubernetesReplicationController(),
 			"kubernetes_role_binding":              resourceKubernetesRoleBinding(),
@@ -200,7 +203,16 @@ func providerConfigure(d *schema.ResourceData, terraformVersion string) (interfa
 		return nil, err
 	}
 	if cfg == nil {
-		cfg = &restclient.Config{}
+		// Attempt to load in-cluster config
+		cfg, err = restclient.InClusterConfig()
+		if err != nil {
+			// Fallback to standard config if we are not running inside a cluster
+			if err == restclient.ErrNotInCluster {
+				cfg = &restclient.Config{}
+			} else {
+				return nil, fmt.Errorf("Failed to configure: %s", err)
+			}
+		}
 	}
 
 	// Overriding with static configuration
@@ -244,6 +256,13 @@ func providerConfigure(d *schema.ResourceData, terraformVersion string) (interfa
 			return nil, fmt.Errorf("Failed to parse exec")
 		}
 		cfg.ExecProvider = exec
+	}
+
+	if logging.IsDebugOrHigher() {
+		log.Printf("[DEBUG] Enabling HTTP requests/responses tracing")
+		cfg.WrapTransport = func(rt http.RoundTripper) http.RoundTripper {
+			return logging.NewTransport("Kubernetes", rt)
+		}
 	}
 
 	k, err := kubernetes.NewForConfig(cfg)

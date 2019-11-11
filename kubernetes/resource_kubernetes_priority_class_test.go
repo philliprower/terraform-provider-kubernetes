@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
-	api "k8s.io/api/scheduling/v1beta1"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	api "k8s.io/api/scheduling/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -144,12 +144,9 @@ func testAccCheckKubernetesPriorityClassDestroy(s *terraform.State) error {
 			continue
 		}
 
-		_, name, err := idParts(rs.Primary.ID)
-		if err != nil {
-			return err
-		}
+		name := rs.Primary.ID
 
-		resp, err := conn.Scheduling().PriorityClasses().Get(name, meta_v1.GetOptions{})
+		resp, err := conn.SchedulingV1().PriorityClasses().Get(name, meta_v1.GetOptions{})
 		if err == nil {
 			if resp.Name == name {
 				return fmt.Errorf("Resource Quota still exists: %s", rs.Primary.ID)
@@ -169,12 +166,9 @@ func testAccCheckKubernetesPriorityClassExists(n string, obj *api.PriorityClass)
 
 		conn := testAccProvider.Meta().(*KubeClientsets).MainClientset
 
-		_, name, err := idParts(rs.Primary.ID)
-		if err != nil {
-			return err
-		}
+		name := rs.Primary.ID
 
-		out, err := conn.Scheduling().PriorityClasses().Get(name, meta_v1.GetOptions{})
+		out, err := conn.SchedulingV1().PriorityClasses().Get(name, meta_v1.GetOptions{})
 		if err != nil {
 			return err
 		}
